@@ -1,0 +1,1 @@
+TABLES = {'programs': (['partner', 'program_id', 'title', 'active'], ['partner', 'program_id']), 'editions': (['partner', 'edition_id', 'program_id', 'language', 'duration'], ['partner', 'edition_id']), 'grants': (['partner', 'grant_id', 'edition_id', 'region', 'valid_from', 'valid_to'], ['partner', 'grant_id'])}
