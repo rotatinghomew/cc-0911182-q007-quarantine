@@ -4,9 +4,11 @@
 
 ## 现有业务
 
-现有供稿包先原样登记，再进行整包字段校验与事务接收；任何非法记录会使整包拒绝，记录原包状态。节目、语种版本与授权按供稿方隔离，分发查询只返回当前可关联的有效节目，授权结束日期不包含当日。目前无逐行隔离、依赖等待或补正放行状态。
+供稿包先原样登记，再按**逐行判定**接收：单条记录字段不合格只隔离该记录（`pending_rows.state='invalid'`），同包中与它无关的合法节目、版本、授权仍进入业务表并可发布；字段合格但引用的父记录尚不可关联的记录进入等待（`pending_rows.state='waiting'`），其授权不会进入可分发集市。节目、语种版本与授权按供稿方隔离，分发查询只返回当前可关联且未被撤销链路阻断的有效节目，授权结束日期不包含当日。
 
-`distribution.publish` 冻结某天可分发的节目授权，`distribution.read_release` 读取已发布内容；版本保留供追溯，当前在线可用查询仍以现有事实关联为准。
+合作方按原记录标识发来的修正放在信封的 `corrections` 段：补正成功后该记录进入集市，并自动释放原来因它而等待的下游版本/授权，无需重新报送整包。正式撤销放在 `revocations` 段：被撤销标识及其下游依赖停止可用，但业务行、原始投递与每次判定依据（`row_events`，只追加）都保留为历史事实，不被覆盖。重发同一包、重复送达同一修正、同一标识在不同媒体出现，均按业务键（含供稿方）幂等处理，不产生重复或串改。
+
+`distribution.publish` 冻结某天可分发的节目授权，`distribution.read_release` 读取已发布内容；版本保留供追溯，当前在线可用查询仍以现有事实关联为准。运营可通过 `status`、`unavailable`、`report` 查看一项内容为何不可用、关联等待与自身错误分别是什么，并核对部分成功后原包的记录总数。最终可用结果与把合法修正一次性正确导入等价，校验不会被绕过。
 
 ## 使用
 
@@ -24,6 +26,10 @@ python -m unittest discover -s tests -v
 python -m compileall -q warehouse tests
 python -m warehouse.cli --database /tmp/quarantine.duckdb load samples/delivery.json
 python -m warehouse.cli --database /tmp/quarantine.duckdb overview
+python -m warehouse.cli --database /tmp/quarantine.duckdb report sample-delivery
+python -m warehouse.cli --database /tmp/quarantine.duckdb status grants media-a g1
+python -m warehouse.cli --database /tmp/quarantine.duckdb unavailable
+python -m warehouse.cli --database /tmp/quarantine.duckdb load samples/correction.json
 python -m warehouse.cli --database /tmp/quarantine.duckdb export /tmp/quarantine-exports release1
 ```
 
@@ -33,8 +39,8 @@ python -m warehouse.cli --database /tmp/quarantine.duckdb export /tmp/quarantine
 
 构建所需工具和传递依赖同样精确锁定，并包含在容器依赖中。执行 `python -m build --wheel --no-isolation` 可在不下载额外构建依赖的情况下生成 wheel；SQL 表定义随包分发。
 
-接收包包含 `batch_id` 和 `tables`。合法字段由各表契约与领域校验共同约束；同批号同内容重送不重复写入，同业务键异内容拒绝整个接收事务。已有原始行和接收回执保留，业务值更正须采用领域中允许的独立记录，不能覆写原行。
+接收包包含 `batch_id` 和 `tables`，并可选携带 `corrections`（按原记录标识补正）与 `revocations`（正式撤销标记，含 `partner`、对应记录标识与可选 `reason`）。合法字段由各表契约与领域校验共同约束；同批号同内容重送不重复写入，同业务键异内容拒绝该记录并隔离，不影响同包其他记录。已有原始行和接收回执保留，业务值更正须采用 `corrections` 独立记录，不能覆写原行；逐行判定写入只追加的 `row_events`，批次逐项计数写入 `batch_reports`。
 
-`warehouse.storage.open_store` 打开仓库，`warehouse.ingest.ingest` 接收业务包，`warehouse.queries` 提供现有事实查询。`warehouse.export.export_tables` 固定一次读取视图并生成版本目录，`read_export` 校验成员文件摘要后读取。`samples/delivery.json` 展示各表的当前字段和合法数据。
+`warehouse.storage.open_store` 打开仓库，`warehouse.ingest.ingest` 接收业务包并返回逐行判定 `report`，`warehouse.decisions` 承载逐行隔离、依赖等待、补正释放与撤销生命周期，`warehouse.status` 与 `warehouse.queries` 提供可用性原因与批次核对。`warehouse.export.export_tables` 固定一次读取视图并生成版本目录，`read_export` 校验成员文件摘要后读取。`samples/delivery.json` 展示投递字段，`samples/correction.json` 展示修正与撤销信封。
 
-领域校验、事实计算与查询分别存在于同一应用的不同职责中。SQL 定义保存当前存储契约；批号回执与原始行登记属于接收事务，不是业务汇总来源。文件导出只交换现有业务表，接收回执不会充当事实行。
+领域校验、事实计算与查询分别存在于同一应用的不同职责中。SQL 定义保存当前存储契约；批号回执、逐行事件与原始行登记属于接收事务，不是业务汇总来源。文件导出只交换现有业务表，接收回执与判定账本不会充当事实行。

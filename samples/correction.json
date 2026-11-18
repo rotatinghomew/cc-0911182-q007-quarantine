@@ -1,0 +1,24 @@
+{
+  "batch_id": "sample-correction",
+  "tables": {},
+  "corrections": {
+    "editions": [
+      {
+        "partner": "media-a",
+        "edition_id": "e1",
+        "program_id": "p1",
+        "language": "zh",
+        "duration": 180
+      }
+    ]
+  },
+  "revocations": {
+    "programs": [
+      {
+        "partner": "media-a",
+        "program_id": "p9",
+        "reason": "合作方正式撤销该节目"
+      }
+    ]
+  }
+}
